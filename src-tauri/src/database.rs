@@ -4,12 +4,33 @@ use std::sync::Mutex;
 use crate::error::{AuraError, AuraResult, app_data_dir};
 
 pub static DB: Lazy<Mutex<Connection>> = Lazy::new(|| {
-    let path = app_data_dir().join("aura.db");
-    std::fs::create_dir_all(path.parent().unwrap()).expect("create data dir");
-    let conn = Connection::open(&path).expect("open database");
-    init_db(&conn).expect("init database");
+    let conn = open_or_fallback();
+    init_db(&conn).unwrap_or_else(|e| eprintln!("[aura] db init warning: {e}"));
     Mutex::new(conn)
 });
+
+/// Opens the on-disk database, falling back to an in-memory database on any
+/// failure so the application can still run (search/intent still work, index
+/// is rebuilt from scratch on each launch).
+fn open_or_fallback() -> Connection {
+    match app_data_dir() {
+        Ok(dir) => {
+            let path = dir.join("aura.db");
+            if let Err(e) = std::fs::create_dir_all(&dir) {
+                eprintln!("[aura] cannot create data dir {}: {e} – using in-memory DB", dir.display());
+                return Connection::open_in_memory().expect("in-memory DB");
+            }
+            Connection::open(&path).unwrap_or_else(|e| {
+                eprintln!("[aura] cannot open DB at {}: {e} – using in-memory DB", path.display());
+                Connection::open_in_memory().expect("in-memory DB")
+            })
+        }
+        Err(e) => {
+            eprintln!("[aura] {e} – using in-memory DB");
+            Connection::open_in_memory().expect("in-memory DB")
+        }
+    }
+}
 
 fn init_db(conn: &Connection) -> AuraResult<()> {
     conn.execute_batch("
@@ -37,7 +58,7 @@ fn init_db(conn: &Connection) -> AuraResult<()> {
         );
         CREATE TABLE IF NOT EXISTS plugins (
             id          INTEGER PRIMARY KEY AUTOINCREMENT,
-            name        TEXT NOT NULL,
+            name        TEXT NOT NULL UNIQUE,
             script_path TEXT NOT NULL,
             enabled     INTEGER NOT NULL DEFAULT 1
         );

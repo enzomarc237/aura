@@ -25,8 +25,15 @@ impl serde::Serialize for AuraError {
 pub type AuraResult<T> = Result<T, AuraError>;
 
 /// Returns the application data directory for Aura.
-pub fn app_data_dir() -> PathBuf {
+///
+/// Checks the `AURA_DATA_DIR` environment variable first (used in tests to
+/// avoid writing to the real user data directory).  Falls back to the OS data
+/// directory.  Returns an error when the directory cannot be determined.
+pub fn app_data_dir() -> Result<PathBuf, AuraError> {
+    if let Ok(dir) = std::env::var("AURA_DATA_DIR") {
+        return Ok(PathBuf::from(dir));
+    }
     dirs::data_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join("Aura")
+        .map(|d| d.join("Aura"))
+        .ok_or_else(|| AuraError::Search("cannot determine OS data directory".into()))
 }

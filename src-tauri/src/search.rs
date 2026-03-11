@@ -62,7 +62,10 @@ pub fn fuzzy_search(query: &str, max_results: usize) -> AuraResult<Vec<SearchRes
             let recency_bonus = item
                 .last_modified
                 .map(|ts| {
-                    let age_days = (chrono::Utc::now().timestamp() - ts) as f64 / 86400.0;
+                    // Clamp to 0 so future timestamps (age_days < 0) don't produce
+                    // recency scores > 1.0 and corrupt the composite ranking.
+                    let age_days = ((chrono::Utc::now().timestamp() - ts) as f64 / 86400.0)
+                        .max(0.0);
                     (1.0 / (1.0 + age_days / 30.0)).min(1.0)
                 })
                 .unwrap_or(0.5);

@@ -28,22 +28,32 @@ export function useSearch() {
   const [intent, setIntent] = useState<Intent | null>(null);
   const [loading, setLoading] = useState(false);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Monotonically increasing request counter.  The response handler only
+  // commits results whose generation matches the latest request, discarding
+  // responses that arrived out-of-order.
+  const generationRef = useRef(0);
 
   useEffect(() => {
     if (debounceRef.current) clearTimeout(debounceRef.current);
 
     debounceRef.current = setTimeout(async () => {
+      const generation = ++generationRef.current;
       setLoading(true);
       try {
         const response = await invoke<SearchResponse>("search", { query });
+        // Discard stale responses that belong to an older query.
+        if (generation !== generationRef.current) return;
         setResults(response.results);
         setIntent(response.intent);
       } catch (err) {
+        if (generation !== generationRef.current) return;
         console.error("Search error:", err);
         setResults([]);
         setIntent(null);
       } finally {
-        setLoading(false);
+        if (generation === generationRef.current) {
+          setLoading(false);
+        }
       }
     }, 60);
 

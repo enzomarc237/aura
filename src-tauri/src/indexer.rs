@@ -81,15 +81,33 @@ fn classify_kind(path: &Path) -> &'static str {
     }
 }
 
+/// Returns true if a directory-entry name starts with `.` (hidden on Unix).
+fn is_hidden(entry: &walkdir::DirEntry) -> bool {
+    entry
+        .file_name()
+        .to_str()
+        .map_or(false, |n| n.starts_with('.'))
+}
+
 /// Crawl the filesystem and populate / update the search index.
+///
+/// The filesystem walk is performed *without* holding the DB mutex so that
+/// IPC search queries can still be served concurrently.  The collected
+/// entries are then upserted in a single locked section.
+///
 /// Returns the number of items upserted.
 pub fn build_index() -> AuraResult<usize> {
     let dirs = index_dirs();
-    let mut count = 0usize;
 
-    let conn = DB.lock().map_err(|_| {
-        crate::error::AuraError::Search("db lock poisoned".into())
-    })?;
+    // --- Phase 1: walk filesystem WITHOUT holding the DB lock ---
+    struct Entry {
+        title: String,
+        path: String,
+        kind: &'static str,
+        modified: Option<i64>,
+    }
+
+    let mut entries: Vec<Entry> = Vec::new();
 
     for base in dirs {
         if !base.exists() {
@@ -106,51 +124,48 @@ pub fn build_index() -> AuraResult<usize> {
             .max_depth(max_depth)
             .follow_links(false)
             .into_iter()
+            // Prune hidden directories during traversal to avoid descending into them
+            .filter_entry(|e| !is_hidden(e))
             .filter_map(|e| e.ok())
         {
             let path = entry.path();
-
-            // Skip hidden files
-            if path
-                .file_name()
-                .and_then(|n| n.to_str())
-                .map_or(false, |n| n.starts_with('.'))
-            {
-                continue;
-            }
-
-            let title = path
-                .file_name()
-                .and_then(|n| n.to_str())
-                .unwrap_or_default()
-                .to_string();
-
-            if title.is_empty() {
-                continue;
-            }
+            let title = match path.file_name().and_then(|n| n.to_str()) {
+                Some(t) if !t.is_empty() => t.to_string(),
+                _ => continue,
+            };
 
             // Strip .app extension for display
             let display_title = if title.ends_with(".app") {
                 title.trim_end_matches(".app").to_string()
             } else {
-                title.clone()
+                title
             };
 
-            let kind = classify_kind(path);
-            let modified = modified_timestamp(path);
-            let path_str = path.to_string_lossy().to_string();
-
-            conn.execute(
-                "INSERT INTO search_index (title, path, kind, last_modified, rank)
-                 VALUES (?1, ?2, ?3, ?4, 1.0)
-                 ON CONFLICT(path) DO UPDATE SET
-                     title = excluded.title,
-                     kind  = excluded.kind,
-                     last_modified = excluded.last_modified",
-                params![display_title, path_str, kind, modified],
-            )?;
-            count += 1;
+            entries.push(Entry {
+                title: display_title,
+                path: path.to_string_lossy().into_owned(),
+                kind: classify_kind(path),
+                modified: modified_timestamp(path),
+            });
         }
+    }
+
+    // --- Phase 2: batch-upsert while holding the DB lock ---
+    let count = entries.len();
+    let conn = DB.lock().map_err(|_| {
+        crate::error::AuraError::Search("db lock poisoned".into())
+    })?;
+
+    for e in entries {
+        conn.execute(
+            "INSERT INTO search_index (title, path, kind, last_modified, rank)
+             VALUES (?1, ?2, ?3, ?4, 1.0)
+             ON CONFLICT(path) DO UPDATE SET
+                 title = excluded.title,
+                 kind  = excluded.kind,
+                 last_modified = excluded.last_modified",
+            params![e.title, e.path, e.kind, e.modified],
+        )?;
     }
 
     Ok(count)
@@ -163,10 +178,10 @@ pub fn get_all_items() -> AuraResult<Vec<IndexedItem>> {
     })?;
 
     let mut stmt = conn.prepare(
-        "SELECT id, title, path, kind, last_modified, rank FROM search_index ORDER BY rank DESC, title ASC LIMIT 5000",
+        "SELECT id, title, path, kind, last_modified, rank FROM search_index ORDER BY rank DESC, title ASC",
     )?;
 
-    let items = stmt
+    let items: Result<Vec<IndexedItem>, _> = stmt
         .query_map([], |row| {
             Ok(IndexedItem {
                 id: row.get(0)?,
@@ -177,10 +192,9 @@ pub fn get_all_items() -> AuraResult<Vec<IndexedItem>> {
                 rank: row.get(5)?,
             })
         })?
-        .filter_map(|r| r.ok())
         .collect();
 
-    Ok(items)
+    Ok(items?)
 }
 
 /// Insert a single item (used for plugins / custom commands).

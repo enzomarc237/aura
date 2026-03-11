@@ -76,7 +76,8 @@ static PATTERNS: Lazy<Vec<IntentPattern>> = Lazy::new(|| {
             kind: "system",
             action: "set_volume",
             extract: |caps| {
-                let v: u8 = caps
+                // Parse as u64 first to avoid u8 overflow on values > 255, then clamp to 100.
+                let v: u64 = caps
                     .get(1)
                     .and_then(|m| m.as_str().parse().ok())
                     .unwrap_or(50)
@@ -104,7 +105,8 @@ static PATTERNS: Lazy<Vec<IntentPattern>> = Lazy::new(|| {
             kind: "system",
             action: "set_brightness",
             extract: |caps| {
-                let v: u8 = caps
+                // Parse as u64 first to avoid u8 overflow on values > 255, then clamp to 100.
+                let v: u64 = caps
                     .get(1)
                     .and_then(|m| m.as_str().parse().ok())
                     .unwrap_or(80)
@@ -115,14 +117,23 @@ static PATTERNS: Lazy<Vec<IntentPattern>> = Lazy::new(|| {
     ]
 });
 
+/// Percent-encodes a string for use in a URL query parameter.
+///
+/// Iterates over the *UTF-8 bytes* of the string so that multi-byte Unicode
+/// characters are encoded as `%XX%XX…` sequences rather than a single
+/// `%XXXXXX` code-point escape, producing valid RFC-3986 percent-encoding.
 fn urlencoding(s: &str) -> String {
-    s.chars()
-        .map(|c| match c {
-            'A'..='Z' | 'a'..='z' | '0'..='9' | '-' | '_' | '.' | '~' => c.to_string(),
-            ' ' => '+'.to_string(),
-            c => format!("%{:02X}", c as u32),
-        })
-        .collect()
+    let mut result = String::with_capacity(s.len() * 3);
+    for byte in s.as_bytes() {
+        match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                result.push(*byte as char);
+            }
+            b' ' => result.push('+'),
+            b => result.push_str(&format!("%{b:02X}")),
+        }
+    }
+    result
 }
 
 /// Attempt to parse the user query as an intent.

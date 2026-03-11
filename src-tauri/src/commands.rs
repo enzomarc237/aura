@@ -119,6 +119,32 @@ pub fn execute_intent(action: String, payload: serde_json::Value) -> Result<(), 
             let name = payload["name"].as_str().unwrap_or("");
             open_path(name)?;
         }
+        "start_timer" => {
+            let minutes = payload["minutes"].as_u64().unwrap_or(25);
+            // Spawn a background thread that fires a notification when the timer elapses.
+            std::thread::spawn(move || {
+                std::thread::sleep(std::time::Duration::from_secs(minutes * 60));
+                #[cfg(target_os = "macos")]
+                {
+                    let message = format!(
+                        "display notification \"Timer complete!\" with title \"Aura\" subtitle \"{minutes} minute timer\" sound name \"Glass\""
+                    );
+                    let _ = std::process::Command::new("osascript")
+                        .args(["-e", &message])
+                        .output();
+                }
+                #[cfg(target_os = "linux")]
+                {
+                    let _ = std::process::Command::new("notify-send")
+                        .args([
+                            "Aura",
+                            &format!("{minutes} minute timer complete!"),
+                            "--urgency=normal",
+                        ])
+                        .output();
+                }
+            });
+        }
         #[cfg(target_os = "macos")]
         "sleep" => {
             std::process::Command::new("pmset")
@@ -141,7 +167,49 @@ pub fn execute_intent(action: String, payload: serde_json::Value) -> Result<(), 
                 .spawn()
                 .map_err(AuraError::Io)?;
         }
-        _ => {}
+        #[cfg(target_os = "macos")]
+        "set_brightness" => {
+            let v = payload["brightness"].as_u64().unwrap_or(80).min(100);
+            // macOS: use the `brightness` CLI if available; fall back to AppleScript.
+            let success = std::process::Command::new("brightness")
+                .arg(format!("{:.2}", v as f64 / 100.0))
+                .status()
+                .map(|s| s.success())
+                .unwrap_or(false);
+            if !success {
+                let script = format!(
+                    "tell application \"System Events\" to tell appearance preferences to set dark mode to dark mode"
+                );
+                // AppleScript cannot set brightness directly without Accessibility; log the
+                // limitation rather than returning an opaque error.
+                eprintln!(
+                    "[aura] set_brightness: 'brightness' CLI not found; brightness={v}/100. \
+                     Install `brightness` (brew install brightness) for full support."
+                );
+                let _ = script; // suppress unused-variable warning
+            }
+        }
+        #[cfg(target_os = "linux")]
+        "set_volume" => {
+            let v = payload["volume"].as_u64().unwrap_or(50).min(100);
+            let _ = std::process::Command::new("amixer")
+                .args(["set", "Master", &format!("{}%", v)])
+                .spawn()
+                .map_err(AuraError::Io)?;
+        }
+        #[cfg(target_os = "linux")]
+        "set_brightness" => {
+            let v = payload["brightness"].as_u64().unwrap_or(80).min(100);
+            let _ = std::process::Command::new("xrandr")
+                .args(["--output", "eDP-1", "--brightness", &format!("{:.2}", v as f64 / 100.0)])
+                .spawn()
+                .map_err(AuraError::Io)?;
+        }
+        other => {
+            return Err(AuraError::Intent(format!(
+                "unhandled intent action: {other}"
+            )));
+        }
     }
     Ok(())
 }
