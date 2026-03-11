@@ -1,0 +1,25 @@
+# Node.js
+node_modules/
+dist/
+dist-node/
+.env
+.env.local
+
+# Rust / Tauri
+src-tauri/target/
+src-tauri/WixTools/
+gen/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/settings.json
+.idea/
+*.swp
+*.swo
+
+# Logs
+*.log
+npm-debug.log*

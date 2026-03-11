@@ -1,0 +1,11 @@
+{
+  "$schema": "https://schema.tauri.app/config/2/capability",
+  "identifier": "default",
+  "description": "Default permissions for Aura – least-privilege: only open URLs/files and use the system tray.",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    "core:tray:default",
+    "shell:allow-open"
+  ]
+}
