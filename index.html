@@ -5,6 +5,10 @@
     <link rel="icon" type="image/png" href="/favicon.png" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Aura</title>
+    <style>
+      /* Eliminate WebView default white background before CSS bundles load. */
+      html, body { background-color: rgba(0, 0, 0, 0) !important; }
+    </style>
   </head>
   <body>
     <div id="root"></div>
