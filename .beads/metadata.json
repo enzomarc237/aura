@@ -1,0 +1,7 @@
+{
+  "database": "dolt",
+  "backend": "dolt",
+  "dolt_mode": "server",
+  "dolt_database": "aura",
+  "project_id": "68c65309-6da1-4caf-aad1-9f317bd5921a"
+}

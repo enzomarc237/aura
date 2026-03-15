@@ -55,7 +55,7 @@ export function useSearch() {
           setLoading(false);
         }
       }
-    }, 60);
+    }, 150);
 
     return () => {
       if (debounceRef.current) clearTimeout(debounceRef.current);
