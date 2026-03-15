@@ -15,7 +15,7 @@ use tauri_plugin_global_shortcut::GlobalShortcutExt;
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
-        .plugin(tauri_plugin_global_shortcut::init())
+        .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .setup(|app| {
             // Explicitly clear the WebView background colour so the window is
             // truly transparent on all platforms (macOS WKWebView, etc.).
