@@ -8,25 +8,48 @@ pub mod search;
 mod tests;
 
 use tauri::{Emitter, Manager};
+use tauri_plugin_global_shortcut::GlobalShortcutExt;
 
 /// Entry point for the Tauri application library.
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
+        .plugin(tauri_plugin_global_shortcut::init())
         .setup(|app| {
+            // Explicitly clear the WebView background colour so the window is
+            // truly transparent on all platforms (macOS WKWebView, etc.).
+            if let Some(win) = app.get_webview_window("main") {
+                let _ = win.set_background_color(Some(tauri::webview::Color(0, 0, 0, 0)));
+            }
+
+            // Register Cmd+Space (macOS) / Ctrl+Space (other platforms) global
+            // hotkey to toggle the launcher window visibility.
+            let handle = app.handle().clone();
+            app.global_shortcut()
+                .on_shortcut("CmdOrCtrl+Space", move |_app, _shortcut, _event| {
+                    if let Some(win) = handle.get_webview_window("main") {
+                        if win.is_visible().unwrap_or(false) {
+                            let _ = win.hide();
+                        } else {
+                            let _ = win.show();
+                            let _ = win.set_focus();
+                        }
+                    }
+                })?;
+
             // System-tray icon so the user can show/hide the window after pressing Escape.
             let icon = app
                 .default_window_icon()
                 .cloned()
                 .expect("app icon must be configured in tauri.conf.json");
-            let handle = app.handle().clone();
+            let handle2 = app.handle().clone();
             let tray = tauri::tray::TrayIconBuilder::new()
                 .icon(icon)
                 .tooltip("Aura – click to show / hide")
                 .on_tray_icon_event(move |_tray, event| {
                     if let tauri::tray::TrayIconEvent::Click { .. } = event {
-                        if let Some(win) = handle.get_webview_window("main") {
+                        if let Some(win) = handle2.get_webview_window("main") {
                             if win.is_visible().unwrap_or(false) {
                                 let _ = win.hide();
                             } else {
@@ -43,15 +66,15 @@ pub fn run() {
             // Kick off background indexing with a short delay so the frontend
             // has time to register its event listeners before the completion
             // event is emitted.
-            let handle2 = app.handle().clone();
+            let handle3 = app.handle().clone();
             std::thread::spawn(move || {
                 std::thread::sleep(std::time::Duration::from_millis(500));
                 match indexer::build_index() {
                     Ok(n) => {
-                        let _ = handle2.emit("index_complete", n);
+                        let _ = handle3.emit("index_complete", n);
                     }
                     Err(e) => {
-                        let _ = handle2.emit("index_error", e.to_string());
+                        let _ = handle3.emit("index_error", e.to_string());
                     }
                 }
             });
