@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { listen } from "@tauri-apps/api/event";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { SearchBar } from "./components/SearchBar";
 import { ResultList } from "./components/ResultList";
 import { useSearch } from "./hooks/useSearch";
@@ -32,10 +33,7 @@ export default function App() {
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
-        // In Tauri, we hide rather than close
-        import("@tauri-apps/api/window").then(({ getCurrentWindow }) => {
-          getCurrentWindow().hide();
-        });
+        getCurrentWindow().hide();
       }
     };
     document.addEventListener("keydown", handleKeyDown);

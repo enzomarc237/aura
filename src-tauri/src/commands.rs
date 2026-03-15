@@ -26,19 +26,25 @@ pub struct SettingsResponse {
 
 /// Perform a fuzzy search and optional intent classification.
 #[command]
-pub fn search(query: String) -> Result<SearchResponse, AuraError> {
-    let max_results = get_setting("max_results")?
-        .and_then(|v| v.parse::<usize>().ok())
-        .unwrap_or(10);
+pub async fn search(query: String) -> Result<SearchResponse, AuraError> {
+    let result = tokio::task::spawn_blocking(move || {
+        let max_results = get_setting("max_results")?
+            .and_then(|v| v.parse::<usize>().ok())
+            .unwrap_or(10);
 
-    let results = fuzzy_search(&query, max_results)?;
-    let intent = parse_intent(&query);
+        let results = fuzzy_search(&query, max_results)?;
+        let intent = parse_intent(&query);
 
-    Ok(SearchResponse {
-        results,
-        intent,
-        query,
+        Ok::<SearchResponse, AuraError>(SearchResponse {
+            results,
+            intent,
+            query,
+        })
     })
+    .await
+    .map_err(|e| AuraError::Search(e.to_string()))?;
+
+    result
 }
 
 /// Execute an action identified by item ID.
